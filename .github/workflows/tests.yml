@@ -43,15 +43,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      # kajenn 0.6.0 is not on PyPI yet: take it from develop.
-      # Remove this step once kajenn 0.6.0 is released.
-      - name: Install kajenn from develop
+      - name: Install project with all extras
         run: |
           python -m pip install --upgrade pip
-          pip install "kajenn @ git+https://github.com/kajenn-org/kajenn@develop"
-
-      - name: Install project with all extras
-        run: pip install ".[dev,asqueel,sqlalchemy,django]"
+          pip install ".[dev,asqueel,sqlalchemy,django]"
 
       - name: Ruff
         run: ruff check src/ tests/

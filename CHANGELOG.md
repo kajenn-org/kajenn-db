@@ -4,9 +4,9 @@ All notable changes to kajenn-db are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-10-27
 
-First release. Requires `kajenn>=0.6.0.dev0`, the first kajenn with the
+First release. Requires `kajenn>=0.6.0`, the first kajenn with the
 `DbHandlerBase` contract.
 
 ### Added
