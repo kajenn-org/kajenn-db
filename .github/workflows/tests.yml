@@ -1,0 +1,60 @@
+name: Tests
+
+"on":
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
+  workflow_dispatch:
+  # Daily run against the latest kajenn and backend releases: a change
+  # published upstream surfaces here without a push.
+  schedule:
+    - cron: '0 5 * * *'
+
+jobs:
+  test:
+    name: pytest + ruff (Linux/glibc)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GNR_TEST_PG_HOST: 127.0.0.1
+      GNR_TEST_PG_PORT: '5432'
+      GNR_TEST_PG_USER: postgres
+      GNR_TEST_PG_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # kajenn 0.6.0 is not on PyPI yet: take it from develop.
+      # Remove this step once kajenn 0.6.0 is released.
+      - name: Install kajenn from develop
+        run: |
+          python -m pip install --upgrade pip
+          pip install "kajenn @ git+https://github.com/kajenn-org/kajenn@develop"
+
+      - name: Install project with all extras
+        run: pip install ".[dev,asqueel,sqlalchemy,django]"
+
+      - name: Ruff
+        run: ruff check src/ tests/
+
+      - name: Tests
+        run: pytest tests/
