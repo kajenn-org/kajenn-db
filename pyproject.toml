@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kajenn-db"
+version = "0.1.0"
+description = "Database handlers for kajenn: asqueel, with SQLAlchemy and Django probes"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Genropy Team", email = "info@softwell.it"}
+]
+keywords = ["asgi", "kajenn", "database", "asqueel"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Framework :: AsyncIO",
+]
+
+dependencies = [
+    "kajenn>=0.6.0.dev0",
+]
+
+[project.optional-dependencies]
+asqueel = ["asqueel[postgresql,migration]>=0.9,<0.10"]
+sqlalchemy = ["sqlalchemy>=2.0.22"]
+django = ["django>=4.2"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Repository = "https://github.com/kajenn-org/kajenn-db"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kajenn_db"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "asqueel: needs the [asqueel] extra",
+    "sqlalchemy: needs the [sqlalchemy] extra",
+    "django: needs the [django] extra",
+    "postgresql: needs a reachable PostgreSQL server",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
