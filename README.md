@@ -13,20 +13,33 @@ on another backend and stop there (see [Probes](#probes)).
 ## Install
 
 ```bash
-pip install kajenn-db[asqueel]
-pip install kajenn-db[sqlalchemy]
-pip install kajenn-db[django]
+pip install "kajenn-db[asqueel]"
+pip install "kajenn-db[sqlalchemy]"
+pip install "kajenn-db[django]"
 ```
+
+The quotes keep shells such as zsh from reading the brackets as a pattern.
+The `asqueel` extra installs `asqueel[postgresql,migration]`: the PostgreSQL
+driver and asqueel's migration support come with it.
 
 Importing a backend module without its extra raises an `ImportError` that
 names the command above.
 
 ## Declare an asqueel database
 
+A site recipe declares the application and its databases:
+
 ```python
-from kajenn import AsgiServer
+from genro_routes import route
+from kajenn import AsgiServer, RoutedApplication
 from kajenn.config import AsgiConfigBuilder
 from kajenn_db.asqueel import AsqueelDbHandler
+
+
+class Notes(RoutedApplication):
+    @route()
+    def count(self, _request=None):
+        return _request.db().table("app.note").query().count()
 
 
 class Configuration(AsgiConfigBuilder):
@@ -34,14 +47,43 @@ class Configuration(AsgiConfigBuilder):
 
     def main(self, root):
         cfg = root.configuration()
+        cfg.applications().application(code="notes", app_class=Notes)
         dbs = cfg.databases(handler_class=AsqueelDbHandler)
-        dbs.database(code="default", source="shop.xml")
+        dbs.database(code="default", source="models/shop.py")
+
+
+server = AsgiServer(config=Configuration)
+```
+
+- `default_config = False` — the recipe has no defaults layer of its own. With
+  `None`, kajenn layers the recipe over `<base_dir>/config.py` when that file
+  exists.
+- A route that declares `_request` receives the live `Request` of the call.
+- `models/shop.py` is an asqueel recipe: a module that defines exactly one
+  `SqlDatabaseConfig` subclass.
+
+```python
+from asqueel import SqlDatabaseConfig
+
+
+class Shop(SqlDatabaseConfig):
+    def main(self, root):
+        db = root.db("shop", implementation="sqlite")
+        db.connection("main", database="shop.sqlite")
+        package = db.packages().package("app", sqlschema="main", sqlprefix=False)
+        note = package.table("note", pkey="id")
+        note.column("id", size=":22")
+        note.column("text")
 ```
 
 Each database accepts:
 
-- `source` — anything `AsqueelDb(source, parents=...)` accepts: a recipe, a
-  registered name, a file, a `db` node.
+- `source` — anything `AsqueelDb(source, parents=...)` accepts:
+  - a path to a recipe `.py` file, a directory holding `configure.py`, or a
+    `.tytx` file; a relative path resolves against the process's current
+    directory;
+  - a name without `/` and without `.py`, looked up in asqueel's registry;
+  - a recipe class or instance, or a mounted `db` node.
 - `parents` — passed to `AsqueelDb` as it is.
 - `db_class` — an `AsqueelDb` subclass to build instead of `AsqueelDb`.
 
@@ -52,11 +94,17 @@ with it. No database is opened at declaration time.
 
 - `request.db(name)` takes the main `SessionDb` of the call (`db.session()`),
   once per name per call.
+- `name` is optional. Without it, kajenn takes the application's own default
+  database: its `db_name` when it declares one, else `<app>:default` when that
+  database exists, else `default`. The same rule holds for
+  `request.async_db()`.
 - At the end of the call the handler closes the named sessions of the call,
   then the main one. Work not committed is rolled back, and asqueel logs a
   warning.
 - In 0.1.0 a session opens with no environment: `currentUser` is `None`, and
-  `workdate` and `locale` take asqueel's defaults.
+  `workdate` and `locale` take asqueel's defaults. `AsqueelDb` accepts an
+  `environment` argument, but the handler does not pass one: a database
+  declaration has no parameter for it in this release.
 
 ## Async routes
 
@@ -65,13 +113,14 @@ main `SessionDb`. Its I/O methods are awaitable and run on the server pool, so
 the event loop keeps serving other calls.
 
 ```python
-@route()
-async def add(self, _request=None):
-    db = _request.async_db()
-    notes = db.table("app.note")
-    await notes.insert({"id": "n1", "text": "first"})
-    await db.commit()
-    return await notes.query(columns="$id").fetchPkeys()
+class Notes(RoutedApplication):
+    @route()
+    async def add(self, _request=None):
+        db = _request.async_db()
+        notes = db.table("app.note")
+        await notes.insert({"id": "n1", "text": "first"})
+        await db.commit()
+        return await notes.query(columns="$id").fetchPkeys()
 ```
 
 The view has three levels, plus the cursor:
@@ -83,8 +132,9 @@ The view has three levels, plus the cursor:
 - query — awaitable: `fetch`, `fetchRecord`, `fetchPkeys`, `fetchAsJson`,
   `fetchAsDict`, `fetchAsBag`, `fetchGrouped`, `count`, `delete`, `update`,
   `execute`, `cursor`.
-- cursor — returned by `execute` and `cursor`; awaitable: `fetchone`,
-  `fetchmany`, `fetchall`, `close`.
+- cursor — returned by the session's `execute` and `executemany` and by the
+  query's `execute` and `cursor`; awaitable: `fetchone`, `fetchmany`,
+  `fetchall`, `close`.
 
 Every other I/O method raises `UnsupportedFeatureError` on the view, naming
 what to use instead: `iterfetch` and `serverfetch` name `cursor()`; `close`
@@ -172,3 +222,17 @@ dbs.database(code="default", alias="default")
   `app_label.name`; `migrate(name)` applies them (`manage.py migrate
   --database alias`). Both are sync and close the calling thread's connection
   at the end.
+
+## Tests
+
+```bash
+pip install -e ".[dev,asqueel,sqlalchemy,django]"
+pytest
+```
+
+- The suite needs the `asqueel` extra. The SQLAlchemy and Django tests are
+  skipped when their extra is missing.
+- The PostgreSQL tests read the server from `GNR_TEST_PG_HOST` (default
+  `127.0.0.1`), `GNR_TEST_PG_PORT` (`5432`), `GNR_TEST_PG_USER` (`postgres`)
+  and `GNR_TEST_PG_PASSWORD`. They are skipped when the server is not
+  reachable.

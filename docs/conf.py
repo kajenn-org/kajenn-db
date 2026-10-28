@@ -1,4 +1,4 @@
-# Copyright 2025 Softwell S.r.l.
+# Copyright 2026 Softwell S.r.l.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 project = "kajenn-db"
-copyright = "2025-2026, Softwell S.r.l."
+copyright = "2026, Softwell S.r.l."
 author = "Genropy Team"
 try:
     release = _pkg_version("kajenn-db")
