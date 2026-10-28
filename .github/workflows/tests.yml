@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write  # Codecov upload with OIDC
     timeout-minutes: 15
     services:
       postgres:
@@ -52,4 +53,12 @@ jobs:
         run: ruff check src/ tests/
 
       - name: Tests
-        run: pytest tests/
+        run: pytest tests/ --cov=kajenn_db --cov-report=term-missing --cov-report=xml:coverage.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+        with:
+          use_oidc: true
+          files: ./coverage.xml
+          disable_search: true
+          fail_ci_if_error: true
