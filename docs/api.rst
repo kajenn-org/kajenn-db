@@ -7,7 +7,7 @@ asqueel
 -------
 
 .. automodule:: kajenn_db.asqueel
-   :members: AsqueelDbHandler, AsyncSessionView, AsyncTableView, AsyncQueryView, AsyncCursorView
+   :members: AsqueelDbHandler, AsyncAsqueelView, AsyncSessionView, AsyncTableView, AsyncQueryView, AsyncCursorView
    :show-inheritance:
 
 SQLAlchemy
