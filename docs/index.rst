@@ -19,7 +19,7 @@ with a handler class; this package provides those classes.
      - Migrations
      - Status
    * - :class:`~kajenn_db.asqueel.AsqueelDbHandler`
-     - `asqueel <https://pypi.org/project/asqueel/>`_ 0.9
+     - `asqueel <https://pypi.org/project/asqueel/>`_ 0.9.5
      - yes
      - yes
      - yes

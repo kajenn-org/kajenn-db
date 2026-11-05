@@ -1,7 +1,7 @@
 # asqueel
 
 `kajenn_db.asqueel.AsqueelDbHandler` serves databases built with
-[asqueel](https://pypi.org/project/asqueel/) 0.9. It is the supported handler
+[asqueel](https://pypi.org/project/asqueel/) 0.9.5. It is the supported handler
 of this package.
 
 ```bash
@@ -64,17 +64,23 @@ class Notes(RoutedApplication):
         return await notes.query(columns="$id").fetchPkeys()
 ```
 
-The view has three levels, plus the cursor:
+The view has three levels, plus the cursor and the cached fetch:
 
 | Level | Awaitable | Returns a view |
 |---|---|---|
-| session | `execute`, `executemany`, `commit`, `rollback`, `vacuum`, `analyze` | `table(name)`, `session(name)` |
-| table | `insert`, `update`, `delete`, `insertOrUpdate`, `lock` | `query(...)` |
+| session | `execute`, `executemany`, `commit`, `rollback`, `vacuum`, `analyze`, `cleanup_cached_tables` | `table(name)`, `session(name)` |
+| table | `insert`, `update`, `delete`, `insertOrUpdate`, `lock`, `cached` | `query(...)` |
 | query | `fetch`, `fetchRecord`, `fetchPkeys`, `fetchAsJson`, `fetchAsDict`, `fetchAsBag`, `fetchGrouped`, `count`, `delete`, `update`, `execute`, `cursor` | |
 | cursor | `fetchone`, `fetchmany`, `fetchall`, `close` | |
+| cached fetch | `sort`, `search` | `query(...)` |
+| cached page | `fetch` | |
 
 - The cursor view is returned by the session's `execute` and `executemany` and
   by the query's `execute` and `cursor`.
+- `await table(name).cached("owner:name")` returns the cached fetch view; its
+  `query(...)` returns the cached page view. A cached fetch is created with
+  `await query(...).fetch(destinationName="owner:name")`, on a model that
+  declares the db-level option `cachedFetch()`.
 - Every other I/O method raises `UnsupportedFeatureError` on the view, naming
   what to use instead. For example, `iterfetch` and `serverfetch` name
   `cursor()`; `close` belongs to the end of the call; `migrate` and
@@ -91,12 +97,12 @@ The refused methods and what to use instead:
 | session | `close`, `closeConnection` | the end of the call closes the session |
 | session | `reloadModel` | not offered in a call |
 | session | `setConstraintsDeferred` | `await execute()` with the statement |
-| table | `record` | `await query(...).fetchRecord()` (`record` is not available in asqueel 0.9.0) |
+| table | `record` | `await query(...).fetchRecord()` (`record` is not available in asqueel 0.9.5) |
 | table | `sql_insert`, `sql_update`, `sql_delete` | `await insert()`, `update()`, `delete()` |
 | table | `deleteRelated`, `archiveRelatedRecords` | `await delete()`, which applies it |
 | table | `updateRelated` | `await update()`, which applies it |
 | query | `iterfetch`, `serverfetch`, `servercursor` | `await cursor()` and read it |
-| query | `selection` | `await fetch()` (`selection` is not available in asqueel 0.9.0) |
+| query | `selection` | `await fetch()` (`selection` is not available in asqueel 0.9.5) |
 | query | `sql_delete`, `sql_update` | `await delete()`, `update()` |
 
 ### Rules

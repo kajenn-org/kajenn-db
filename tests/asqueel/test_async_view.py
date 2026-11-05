@@ -21,6 +21,7 @@ import inspect
 import json
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -33,12 +34,15 @@ from asqueel import (
     SqlTable,
     UnsupportedFeatureError,
 )
+from asqueel.cached_fetch import CachedFetch, CachedQuery
 from genro_routes import route
 
 from kajenn import AsgiServer, RoutedApplication
 from kajenn.config import AsgiConfigBuilder
 from kajenn_db.asqueel import (
     AsqueelDbHandler,
+    AsyncCachedFetchView,
+    AsyncCachedQueryView,
     AsyncCursorView,
     AsyncQueryView,
     AsyncSessionView,
@@ -48,9 +52,9 @@ from tests.conftest import LifespanRunner, asqueel_closed, ask_app
 
 pytestmark = pytest.mark.asqueel
 
-# The public methods of asqueel 0.9.0 that do no I/O of their own: they pass
+# The public methods of asqueel 0.9.5 that do no I/O of their own: they pass
 # through the view as asqueel has them. table(), query() and session() pass
-# through too, wrapped in a view.
+# through too, wrapped in a view, and so does a cached fetch's query().
 NOT_IO = {
     SessionDb: {
         "clearCurrentEnv",
@@ -101,6 +105,8 @@ NOT_IO = {
     },
     SqlQuery: {"handleBagColumns", "test"},
     SqlCursor: set(),
+    CachedFetch: {"query"},
+    CachedQuery: set(),
 }
 
 VIEWS = {
@@ -108,6 +114,8 @@ VIEWS = {
     SqlTable: AsyncTableView,
     SqlQuery: AsyncQueryView,
     SqlCursor: AsyncCursorView,
+    CachedFetch: AsyncCachedFetchView,
+    CachedQuery: AsyncCachedQueryView,
 }
 
 
@@ -290,3 +298,85 @@ async def test_a_terminal_does_not_block_the_event_loop(sqlite_source: SqlDataba
     assert json.loads(answer["body"]) == 3000000
     assert elapsed > 0.2
     assert max(gaps) < 0.1
+
+
+class CachedNotes(RoutedApplication):
+    """An async route through every level of the cached fetch view."""
+
+    @route()
+    async def cached(self, _request=None) -> dict[str, Any]:
+        db = _request.async_db()
+        notes = db.table("app.note")
+        await notes.insert({"id": "n1", "text": "alpha"})
+        await notes.insert({"id": "n2", "text": "beta"})
+        await db.commit()
+        created = await notes.query(columns="$id,$text", order_by="$id").fetch(
+            destinationName="web:notes"
+        )
+        cached = await notes.cached("web:notes")
+        assert isinstance(cached, AsyncCachedFetchView)
+        page = cached.query(columns="id")
+        assert isinstance(page, AsyncCachedQueryView)
+        before = [row[0] for row in await page.fetch()]
+        found = await cached.search("bet")
+        searched = [row[0] for row in await cached.query(columns="id").fetch()]
+        await cached.search(None)
+        await cached.sort("text DESC")
+        ordered = [row[0] for row in await cached.query(columns="id").fetch()]
+        await db.cleanup_cached_tables("web")
+        try:
+            await notes.cached("web:notes")
+        except ValueError:
+            removed = True
+        else:
+            removed = False
+        return {
+            "created": created,
+            "before": before,
+            "found": found,
+            "searched": searched,
+            "ordered": ordered,
+            "removed": removed,
+        }
+
+
+async def test_a_cached_fetch_is_read_searched_sorted_and_removed_with_awaits(
+    tmp_path: Path,
+) -> None:
+    source = SqlDatabaseConfig()
+    root = source.source.db("notes", implementation="sqlite")
+    root.connection("main", database=str(tmp_path / "cached.sqlite"))
+    root.options().cachedFetch()
+    note = (
+        root.packages().package("app", sqlschema="main", sqlprefix=False).table("note", pkey="id")
+    )
+    note.column("id", size=":22")
+    note.column("text")
+    db = AsqueelDb(source)
+    with db.session() as session:
+        session.migrate()
+        session.commit()
+    db.close()
+
+    class Recipe(AsgiConfigBuilder):
+        default_config = False
+
+        def main(self, root: Any) -> None:
+            cfg = root.configuration()
+            cfg.databases(handler_class=AsqueelDbHandler).database(code="default", source=source)
+            cfg.applications().application(code="notes", mount="", app_class=CachedNotes)
+
+    server = AsgiServer(config=Recipe)
+    runner = LifespanRunner(server)
+    await runner.startup()
+    answer = await ask_app(server, "/cached")
+    await runner.shutdown()
+    assert answer["status"] == 200
+    assert json.loads(answer["body"]) == {
+        "created": 2,
+        "before": ["n1", "n2"],
+        "found": 1,
+        "searched": ["n2"],
+        "ordered": ["n2", "n1"],
+        "removed": True,
+    }
