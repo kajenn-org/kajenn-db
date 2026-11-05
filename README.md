@@ -21,7 +21,7 @@ with a handler class; this package provides those classes.
 
 | Handler | Library | Sync routes | Async routes | Migrations | Status |
 |---|---|---|---|---|---|
-| `kajenn_db.asqueel.AsqueelDbHandler` | [asqueel](https://pypi.org/project/asqueel/) 0.9 | yes | yes | yes | supported |
+| `kajenn_db.asqueel.AsqueelDbHandler` | [asqueel](https://pypi.org/project/asqueel/) 0.9.5 | yes | yes | yes | supported |
 | `kajenn_db.sqlalchemy.SqlAlchemyDbHandler` | SQLAlchemy 2 | yes | yes | no | probe |
 | `kajenn_db.django.DjangoDbHandler` | Django 4.2+ | yes | no | yes | probe |
 

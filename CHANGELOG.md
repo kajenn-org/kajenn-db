@@ -6,6 +6,14 @@ All notable changes to kajenn-db are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The asqueel async view classifies the methods asqueel 0.9.5 added:
+  `SessionDb.cleanup_cached_tables` is awaitable, and `SqlTable.cached` is
+  awaitable and returns a cached fetch view (`sort` and `search` awaitable,
+  `query()` giving a page view whose `fetch` is awaitable). The `asqueel`
+  extra requires asqueel 0.9.5.
+
 ### Changed
 
 - README rewritten: badges, a table of the handlers and their status, a quick
