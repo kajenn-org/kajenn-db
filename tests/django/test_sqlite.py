@@ -28,11 +28,13 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
+from asqueel import SqlDatabaseConfig
 from genro_routes import route
 
 from kajenn import AsgiServer, RoutedApplication
 from kajenn.config import AsgiConfigBuilder
-from tests.conftest import Backend, LifespanRunner, ask_app, django_closed
+from kajenn_db.asqueel import AsqueelDbHandler
+from tests.conftest import Backend, LifespanRunner, asqueel_closed, ask_app, django_closed
 
 django = pytest.importorskip("django")
 
@@ -184,6 +186,44 @@ async def test_two_calls_on_one_thread_have_their_own_connections(
         server.requests.unregister(first)
         worker.shutdown()
         releaser.shutdown()
+
+
+def test_a_refused_close_does_not_stop_the_others(
+    django_backend: Backend, sqlite_source: SqlDatabaseConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Recipe(AsgiConfigBuilder):
+        default_config = False
+
+        def main(self, root: Any) -> None:
+            dbs = root.configuration().databases(handler_class=django_backend.handler_class)
+            dbs.database(code="archive", alias="fresh")
+            dbs.database(code="default", alias="default")
+            dbs.database(code="notes", handler_class=AsqueelDbHandler, source=sqlite_source)
+
+    server = AsgiServer(config=Recipe)
+    handler = server.databases["default"]
+    refusal = django.db.DatabaseError("close refused")
+
+    def refuse() -> None:
+        raise refusal
+
+    call = server.requests.register({"type": "task", "path": "/notes/work"})
+    try:
+        notes = server.take_database("notes")
+        archive = server.take_database("archive")
+        monkeypatch.setattr(archive, "close", refuse)
+        default = orm_work(server)
+        with pytest.raises(django.db.DatabaseError) as raised:
+            handler.release(call)
+        # The asqueel session is not the Django handler's to close.
+        assert not asqueel_closed(notes)
+        server.databases["notes"].release(call)
+    finally:
+        server.requests.unregister(call)
+    assert raised.value is refusal
+    assert django_closed(default)
+    assert not archive.allow_thread_sharing
+    assert not default.allow_thread_sharing
 
 
 async def test_an_async_route_is_refused_and_its_take_released(
