@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-asqueel = ["asqueel[postgresql,migration]>=0.9,<0.10"]
+asqueel = ["asqueel[postgresql,migration]>=0.9.5,<0.10"]
 sqlalchemy = ["sqlalchemy>=2.0.22"]
 django = ["django>=4.2"]
 dev = [

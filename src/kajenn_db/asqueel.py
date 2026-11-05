@@ -21,7 +21,8 @@ call's named sessions, then the main one.
 
 An ``async def`` route works on the async view of the main ``SessionDb``
 (``request.async_db()``): three levels — session, table, query — plus the
-cursor, each with its own ``terminals`` (awaitable, run on the server pool) and
+cursor and the cached fetch, each with its own ``terminals`` (awaitable, run on
+the server pool) and
 its own ``blocked`` methods (refused, naming what to use instead). Every other
 attribute passes through as asqueel has it.
 """
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
 __all__ = [
     "AsqueelDbHandler",
     "AsyncAsqueelView",
+    "AsyncCachedFetchView",
+    "AsyncCachedQueryView",
     "AsyncCursorView",
     "AsyncQueryView",
     "AsyncSessionView",
@@ -90,7 +93,7 @@ class AsqueelDbHandler(DbHandlerBase):
         return self.databases[name].session()
 
     def release(self, call: RegisteredRequest) -> None:
-        # asqueel 0.9.0 has no public "close the whole call": the call's
+        # asqueel 0.9.5 has no public "close the whole call": the call's
         # sessions are reached through the main one, as asqueel.hosting does.
         # Every session is closed even when one refuses; the first error is
         # raised at the end.
@@ -189,19 +192,33 @@ class AsyncQueryView(AsyncAsqueelView):
         "iterfetch": "await cursor() and read it",
         "serverfetch": "await cursor() and read it",
         "servercursor": "await cursor() and read it",
-        "selection": "not available in asqueel 0.9.0; await fetch()",
+        "selection": "not available in asqueel 0.9.5; await fetch()",
         "sql_delete": "await delete()",
         "sql_update": "await update()",
     }
     views = {"execute": AsyncCursorView, "cursor": AsyncCursorView}
 
 
-class AsyncTableView(AsyncAsqueelView):
-    """A ``SqlTable``: its writes and ``lock`` awaitable; ``query()`` gives a query view."""
+class AsyncCachedQueryView(AsyncAsqueelView):
+    """A ``CachedQuery``, one page of a cached fetch: ``fetch`` awaitable."""
 
-    terminals = ("insert", "update", "delete", "insertOrUpdate", "lock")
+    terminals = ("fetch",)
+
+
+class AsyncCachedFetchView(AsyncAsqueelView):
+    """A ``CachedFetch``: ``sort`` and ``search`` awaitable; ``query()`` gives a page view."""
+
+    terminals = ("sort", "search")
+    views = {"query": AsyncCachedQueryView}
+
+
+class AsyncTableView(AsyncAsqueelView):
+    """A ``SqlTable``: its writes, ``lock`` and ``cached`` awaitable; ``query()`` gives a
+    query view, ``cached()`` a cached fetch view once awaited."""
+
+    terminals = ("insert", "update", "delete", "insertOrUpdate", "lock", "cached")
     blocked = {
-        "record": "not available in asqueel 0.9.0; await query(...).fetchRecord()",
+        "record": "not available in asqueel 0.9.5; await query(...).fetchRecord()",
         "sql_insert": "await insert()",
         "sql_update": "await update()",
         "sql_delete": "await delete()",
@@ -209,14 +226,22 @@ class AsyncTableView(AsyncAsqueelView):
         "updateRelated": "await update(), which applies it",
         "archiveRelatedRecords": "await delete(), which applies it",
     }
-    views = {"query": AsyncQueryView}
+    views = {"query": AsyncQueryView, "cached": AsyncCachedFetchView}
 
 
 class AsyncSessionView(AsyncAsqueelView):
     """A ``SessionDb``: statements and the transaction awaitable; tables and named
     sessions as views."""
 
-    terminals = ("execute", "executemany", "commit", "rollback", "vacuum", "analyze")
+    terminals = (
+        "execute",
+        "executemany",
+        "commit",
+        "rollback",
+        "vacuum",
+        "analyze",
+        "cleanup_cached_tables",
+    )
     blocked = {
         "insert": "await table(name).insert()",
         "update": "await table(name).update()",
