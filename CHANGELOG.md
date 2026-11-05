@@ -6,6 +6,13 @@ All notable changes to kajenn-db are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `DjangoDbHandler`: a task, a kbus call or a WSX message no longer leaves its
+  connection open. Each call takes a connection of its own, shared between
+  threads, so kajenn closes it on whatever pool thread releases the call
+  (#1).
+
 ### Changed
 
 - README rewritten: badges, a table of the handlers and their status, a quick

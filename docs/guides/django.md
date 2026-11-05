@@ -23,22 +23,23 @@ dbs.database(code="default", alias="default")
 
 ## One connection per call
 
-- `request.db(name)` takes `connections[alias]`, the connection Django's ORM
-  uses on the calling thread: the ORM in a sync route works on it.
-- The end of the call closes it on the same thread.
+- `request.db(name)` takes a connection of the call, created for it
+  (`connections.create_connection(alias)`).
+- `take` installs it as `connections[alias]` on the calling thread: Django's
+  ORM in the call works on it. The next call on the same thread installs its
+  own.
+- The connection is shared between threads (`inc_thread_sharing()`). kajenn
+  releases a task, a kbus call or a WSX message on any pool thread, and the
+  end of the call closes the connection there.
 
 ## Limits
 
-- Sync routes only. Django binds a connection to the thread that opened it,
-  and kajenn takes a database of an `async def` route on the event-loop
-  thread: `request.async_db(name)` raises `NotImplementedError`. An async route
-  uses Django's async ORM, whose connections kajenn does not release.
-- Not for sync work outside a route either: a task, a kbus call or a WSX
-  message takes the connection on one pool thread, and kajenn releases it with
-  `server.run_sync`, possibly on another. Django refuses to close it there
-  (`DatabaseError`, logged by kajenn) and the connection stays open on the
-  thread that opened it. This is tracked in
-  [issue #1](https://github.com/kajenn-org/kajenn-db/issues/1).
+- No `async def` routes. kajenn takes a database of an async route on the
+  event-loop thread, where Django's ORM does not run:
+  `request.async_db(name)` raises `NotImplementedError`. An async route uses
+  Django's async ORM, whose connections kajenn does not release.
+- One connection per call: Django's persistent connections (`CONN_MAX_AGE`)
+  are not reused across calls.
 
 ## Migrations
 

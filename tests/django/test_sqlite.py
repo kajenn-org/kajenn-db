@@ -12,15 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DjangoDbHandler on SQLite: the ORM in a sync route, the refusal of async routes,
-migrations."""
+"""DjangoDbHandler on SQLite: the ORM in a sync route, sync work released on
+another thread, the refusal of async routes, migrations."""
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import importlib
 import json
 import logging
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -91,6 +95,95 @@ async def test_a_sync_route_uses_the_orm_on_the_taken_connection(
     [taken] = notes.taken
     assert django_closed(taken)
     await runner.shutdown()
+
+
+def orm_work(server: AsgiServer) -> Any:
+    """Take the call's database and use Django's ORM on it, as sync work does."""
+    connection = server.take_database("default")
+    content_type = django.apps.apps.get_model("contenttypes", "ContentType")
+    content_type.objects.get_or_create(app_label="kajenn", model="task")
+    assert django.db.connections["default"] is connection
+    assert connection.connection is not None
+    return connection
+
+
+async def test_a_task_releases_its_connection(
+    django_backend: Backend, caplog: pytest.LogCaptureFixture
+) -> None:
+    server = notes_server(django_backend)
+    await server.run_sync(server.databases["default"].migrate, "default")
+    # The sequence of kajenn's task executor: register, sync work on the pool,
+    # cleanups, unregister.
+    call = server.requests.register({"type": "task", "path": "/notes/work"})
+    try:
+        with caplog.at_level(logging.ERROR):
+            taken = await server.run_sync(orm_work, server)
+            await call.run_cleanups()
+    finally:
+        server.requests.unregister(call)
+    assert django_closed(taken)
+    assert not [record for record in caplog.records if "release" in record.getMessage()]
+
+
+async def test_a_connection_taken_on_one_thread_is_closed_on_another(
+    django_backend: Backend, caplog: pytest.LogCaptureFixture
+) -> None:
+    server = notes_server(django_backend)
+    await server.run_sync(server.databases["default"].migrate, "default")
+    call = server.requests.register({"type": "task", "path": "/notes/work"})
+    taken: list[Any] = []
+    released = threading.Event()
+
+    def take_and_wait() -> None:
+        taken.append(orm_work(server))
+        # Alive until the release, so the releasing thread cannot reuse its id.
+        released.wait()
+
+    def release() -> None:
+        server.release_databases(call)
+        released.set()
+
+    try:
+        with caplog.at_level(logging.ERROR):
+            taker = threading.Thread(target=contextvars.copy_context().run, args=(take_and_wait,))
+            taker.start()
+            while not taken:
+                await asyncio.sleep(0)
+            releaser = threading.Thread(target=release)
+            releaser.start()
+            releaser.join()
+            taker.join()
+    finally:
+        server.requests.unregister(call)
+    assert django_closed(taken[0])
+    assert not [record for record in caplog.records if "release" in record.getMessage()]
+
+
+async def test_two_calls_on_one_thread_have_their_own_connections(
+    django_backend: Backend,
+) -> None:
+    server = notes_server(django_backend)
+    await server.run_sync(server.databases["default"].migrate, "default")
+    worker, releaser = ThreadPoolExecutor(1), ThreadPoolExecutor(1)
+    first = server.requests.register({"type": "task", "path": "/notes/first"})
+    first_taken = worker.submit(contextvars.copy_context().run, orm_work, server).result()
+    second = server.requests.register({"type": "task", "path": "/notes/second"})
+    second_taken = worker.submit(contextvars.copy_context().run, orm_work, server).result()
+    try:
+        assert first_taken is not second_taken
+        releaser.submit(server.release_databases, first).result()
+        assert django_closed(first_taken)
+        # The second call still works on its own connection, on its own thread.
+        assert worker.submit(contextvars.copy_context().run, orm_work, server).result() is (
+            second_taken
+        )
+        releaser.submit(server.release_databases, second).result()
+        assert django_closed(second_taken)
+    finally:
+        server.requests.unregister(second)
+        server.requests.unregister(first)
+        worker.shutdown()
+        releaser.shutdown()
 
 
 async def test_an_async_route_is_refused_and_its_take_released(
