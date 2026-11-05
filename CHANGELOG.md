@@ -8,6 +8,10 @@ All notable changes to kajenn-db are recorded here. The format follows
 
 ### Fixed
 
+- `DjangoDbHandler`: a task, a kbus call or a WSX message no longer leaves its
+  connection open. Each call takes a connection of its own, shared between
+  threads, so kajenn closes it on whatever pool thread releases the call
+  (#1).
 - The asqueel async view classifies the methods asqueel 0.9.5 added:
   `SessionDb.cleanup_cached_tables` is awaitable, and `SqlTable.cached` is
   awaitable and returns a cached fetch view (`sort` and `search` awaitable,

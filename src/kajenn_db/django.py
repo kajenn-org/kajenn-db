@@ -15,16 +15,18 @@
 """The Django probe: kajenn databases served by Django's ``connections``.
 
 A probe, incomplete by declaration: it runs kajenn's handler contract on
-Django, for sync routes only. Django is configured by the process (settings
-and ``django.setup()``), not by the handler. A call takes
-``connections[alias]``, the connection Django's ORM uses on the calling thread,
-and the end of the call closes it on that same thread.
+Django, for sync work only. Django is configured by the process (settings and
+``django.setup()``), not by the handler.
 
-Django binds a connection to the thread that opened it, and the core takes a
-database of an ``async def`` route on the event-loop thread: ``async_view``
-raises, naming Django's async ORM. Sync work outside a route (a task, a kbus
-call, a WSX message) is released by the core with ``server.run_sync``, possibly
-on another pool thread, where Django refuses the close: not supported either.
+A call takes a connection of its own, installed as ``connections[alias]`` on
+the calling thread: Django's ORM in the call works on it. The connection is
+shared between threads, so the end of the call closes it on whatever pool
+thread the core releases it from; the next call on the same thread installs a
+new one.
+
+The core takes a database of an ``async def`` route on the event-loop thread,
+where Django's ORM does not run: ``async_view`` raises, naming Django's async
+ORM.
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ __all__ = ["DjangoDbHandler"]
 
 
 class DjangoDbHandler(DbHandlerBase):
-    """Django database aliases by name; ``connections[alias]`` per name per call.
+    """Django database aliases by name; one connection per name per call.
 
     A database's params: ``alias``, a key of Django's ``DATABASES`` (the
     database's own name by default).
@@ -88,14 +90,31 @@ class DjangoDbHandler(DbHandlerBase):
         self.aliases[name] = params.get("alias", name)
 
     def take(self, name: str, call: RegisteredRequest) -> BaseDatabaseWrapper:
-        return connections[self.aliases[name]]
+        # connections[alias] is one wrapper per thread, shared by every call
+        # the thread serves: the call gets a wrapper of its own instead, and
+        # the ORM on this thread works on it until the next call replaces it.
+        alias = self.aliases[name]
+        connection = connections.create_connection(alias)
+        connection.inc_thread_sharing()
+        connections[alias] = connection
+        return connection
 
     def release(self, call: RegisteredRequest) -> None:
-        # A wrapper taken on the event loop never connected, and closing it
-        # from this pool thread would raise: only a connected one is closed.
+        # Every connection is closed even when one refuses; the first error is
+        # raised at the end.
+        error = None
         for name, connection in call.databases.items():
-            if self.server.databases[name] is self and connection.connection is not None:
+            if self.server.databases[name] is not self:
+                continue
+            try:
                 connection.close()
+            except BaseException as failure:
+                if error is None:
+                    error = failure
+            finally:
+                connection.dec_thread_sharing()
+        if error is not None:
+            raise error
 
     def async_view(self, obj: BaseDatabaseWrapper) -> Any:
         raise NotImplementedError(
