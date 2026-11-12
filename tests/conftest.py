@@ -14,10 +14,17 @@
 
 """Shared test helpers: driving a kajenn server, and the backends under test.
 
-``LifespanRunner`` and ``ask_app`` are copied from kajenn's own
+``LifespanRunner``, ``start_server`` and ``ask_app`` follow kajenn's own
 ``tests/conftest.py`` (not installed with kajenn). ``Backend`` is what the
 contract suite is parametrised over: one fixture per backend, named
 ``<backend>_backend``.
+
+Since kajenn 0.9.0 an ``AsgiServer`` registers its applications disabled: each
+one answers 503 until the lifespan startup ran, its ``on_startup`` returned and
+the server enabled it. ``start_server(server)`` runs the lifespan startup when
+the test did not, then waits until every application answers. ``ask_app`` calls
+it before every request; ``stop_started_servers`` (autouse) shuts down, at the
+end of the test, every lifespan still open.
 
 The SQLAlchemy and Django probes run when their extra is installed; their
 backend fixtures skip, naming the extra, when it is not. Django is configured
@@ -72,6 +79,40 @@ def kajenn_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+#: The lifespans open in the running test, by server identity.
+STARTED: dict[int, LifespanRunner] = {}
+
+
+async def start_server(server: Any) -> Any:
+    """Wait until every application of ``server`` answers, starting its lifespan if needed.
+
+    A server without ``is_enabled`` (kajenn before 0.9.0, or an application
+    driven alone) is returned as it is. The lifespan startup runs here only
+    when no ``LifespanRunner`` started this server in the test. Returns
+    ``server``.
+    """
+    if not hasattr(server, "is_enabled"):
+        return server
+    if id(server) not in STARTED and not all(
+        server.is_enabled(code) for code in server.applications
+    ):
+        await LifespanRunner(server).startup()
+    async with asyncio.timeout(10):
+        while not all(server.is_enabled(code) for code in server.applications):
+            await asyncio.sleep(0.005)
+    return server
+
+
+@pytest.fixture(autouse=True)
+async def stop_started_servers() -> Any:
+    """Autouse: shut down every lifespan still open at the end of the test."""
+    yield
+    runners = list(STARTED.values())
+    STARTED.clear()
+    for runner in runners:
+        await runner.shutdown()
+
+
 class LifespanRunner:
     """The lifespan, driven the way a real ASGI runner drives it."""
 
@@ -82,6 +123,7 @@ class LifespanRunner:
         self._living: asyncio.Task[None] | None = None
 
     async def startup(self) -> None:
+        STARTED[id(self.server)] = self
         self._living = asyncio.ensure_future(
             self.server({"type": "lifespan"}, self._inbox.get, self._send)
         )
@@ -89,6 +131,11 @@ class LifespanRunner:
         await self._answered("lifespan.startup.")
 
     async def shutdown(self) -> None:
+        """Shut the lifespan down; a second call does nothing."""
+        if STARTED.get(id(self.server)) is self:
+            del STARTED[id(self.server)]
+        if self._living is None or self._living.done():
+            return
         await self._inbox.put({"type": "lifespan.shutdown"})
         await self._living
 
@@ -119,6 +166,7 @@ async def ask_app(app: Any, path: str) -> dict[str, Any]:
     async def send(message: dict[str, Any]) -> None:
         sent.append(message)
 
+    await start_server(app)
     await app(scope, receive, send)
     start = next(message for message in sent if message["type"] == "http.response.start")
     body = b"".join(
