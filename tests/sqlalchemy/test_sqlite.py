@@ -20,6 +20,7 @@ import importlib
 import json
 import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -106,6 +107,39 @@ async def test_an_async_route_writes_through_awaited_terminals(notes_server: Asg
     assert notes.threads == [threading.get_ident()]
     assert notes_server.databases["default"].engines["default"].pool.checkedout() == 0
     await runner.shutdown()
+
+
+def test_a_refused_close_does_not_stop_the_others(
+    sqlalchemy_backend: Backend, tmp_path: Path
+) -> None:
+    class Recipe(AsgiConfigBuilder):
+        default_config = False
+
+        def main(self, root: Any) -> None:
+            dbs = root.configuration().databases(handler_class=sqlalchemy_backend.handler_class)
+            dbs.database(code="archive", url=f"sqlite:///{tmp_path / 'archive.sqlite'}")
+            dbs.database(code="default", **sqlalchemy_backend.params)
+
+    server = AsgiServer(config=Recipe)
+    refusal = RuntimeError("close refused")
+
+    def refuse() -> None:
+        raise refusal
+
+    call = server.requests.register({"type": "task", "path": "/notes/work"})
+    try:
+        archive = server.take_database("archive")
+        archive.close = refuse
+        default = server.take_database("default")
+        with pytest.raises(RuntimeError) as raised:
+            server.databases["default"].release(call)
+    finally:
+        server.requests.unregister(call)
+    assert raised.value is refusal
+    assert sqlalchemy_closed(default)
+    assert not sqlalchemy_closed(archive)
+    del archive.close
+    archive.close()
 
 
 def test_importing_without_sqlalchemy_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:

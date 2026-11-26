@@ -78,6 +78,16 @@ class SqlAlchemyDbHandler(DbHandlerBase):
         return Session(self.engines[name], close_resets_only=False)
 
     def release(self, call: RegisteredRequest) -> None:
+        # Every session is closed even when one refuses; the first error is
+        # raised at the end.
+        error = None
         for name, session in call.databases.items():
-            if self.server.databases[name] is self:
+            if self.server.databases[name] is not self:
+                continue
+            try:
                 session.close()
+            except BaseException as failure:
+                if error is None:
+                    error = failure
+        if error is not None:
+            raise error
