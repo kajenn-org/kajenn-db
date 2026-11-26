@@ -42,7 +42,7 @@ every `AsqueelDb`.
   then the main one. Every session is closed even when one of them raises;
   the first error is raised at the end, and kajenn logs it.
 - Work not committed is rolled back, and asqueel logs a warning.
-- In 0.1.0 a session opens with no environment: `currentUser` is `None`, and
+- In 0.1.1 a session opens with no environment: `currentUser` is `None`, and
   `workdate` and `locale` take asqueel's defaults. `AsqueelDb` accepts an
   `environment` argument, but the handler does not pass one: a database
   declaration has no parameter for it in this release.

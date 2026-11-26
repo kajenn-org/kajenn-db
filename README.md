@@ -15,7 +15,7 @@ when the call ends.
 kajenn itself never imports a database driver. A site declares its databases
 with a handler class; this package provides those classes.
 
-**Status**: Alpha. Version 0.1.0 requires `kajenn>=0.6.0` and Python 3.11+.
+**Status**: Alpha. Version 0.1.1 requires `kajenn>=0.6.0` and Python 3.11+.
 
 ## Which handler
 

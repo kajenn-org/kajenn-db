@@ -6,6 +6,8 @@ All notable changes to kajenn-db are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-11-26
+
 ### Fixed
 
 - `DjangoDbHandler`: a task, a kbus call or a WSX message no longer leaves its
@@ -17,6 +19,9 @@ All notable changes to kajenn-db are recorded here. The format follows
   awaitable and returns a cached fetch view (`sort` and `search` awaitable,
   `query()` giving a page view whose `fetch` is awaitable). The `asqueel`
   extra requires asqueel 0.9.5.
+- `SqlAlchemyDbHandler`: the end of a call closes every `Session` of the call
+  even when one `close()` raises, and raises the first error at the end.
+  Before, the first error left the call's other sessions open.
 
 ## [0.1.0] — 2026-10-27
 
