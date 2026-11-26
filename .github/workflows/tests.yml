@@ -1,13 +1,14 @@
 name: Tests
 
+# The whole suite runs on the release pull request to main. Pull requests to
+# develop run lint.yml only.
 "on":
-  push:
-    branches: ['main']
   pull_request:
     branches: ['main']
   workflow_dispatch:
-  # Daily run against the latest kajenn and backend releases: a change
-  # published upstream surfaces here without a push.
+  # Daily run of develop against the latest kajenn and backend releases: a
+  # change published upstream, or a failure merged into develop, surfaces
+  # here without waiting for the release.
   schedule:
     - cron: '0 5 * * *'
 
@@ -38,6 +39,9 @@ jobs:
       GNR_TEST_PG_PASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
+        with:
+          # schedule always starts from the default branch; test develop
+          ref: ${{ github.event_name == 'schedule' && 'develop' || '' }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
