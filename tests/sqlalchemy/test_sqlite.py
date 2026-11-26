@@ -20,14 +20,17 @@ import importlib
 import json
 import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 import pytest
+from asqueel import SqlDatabaseConfig
 from genro_routes import route
 
 from kajenn import AsgiServer, RoutedApplication
 from kajenn.config import AsgiConfigBuilder
-from tests.conftest import Backend, LifespanRunner, ask_app, sqlalchemy_closed
+from kajenn_db.asqueel import AsqueelDbHandler
+from tests.conftest import Backend, LifespanRunner, ask_app, asqueel_closed, sqlalchemy_closed
 
 sqlalchemy = pytest.importorskip("sqlalchemy")
 
@@ -106,6 +109,44 @@ async def test_an_async_route_writes_through_awaited_terminals(notes_server: Asg
     assert notes.threads == [threading.get_ident()]
     assert notes_server.databases["default"].engines["default"].pool.checkedout() == 0
     await runner.shutdown()
+
+
+def test_a_refused_close_does_not_stop_the_others(
+    sqlalchemy_backend: Backend, sqlite_source: SqlDatabaseConfig, tmp_path: Path
+) -> None:
+    class Recipe(AsgiConfigBuilder):
+        default_config = False
+
+        def main(self, root: Any) -> None:
+            dbs = root.configuration().databases(handler_class=sqlalchemy_backend.handler_class)
+            dbs.database(code="archive", url=f"sqlite:///{tmp_path / 'archive.sqlite'}")
+            dbs.database(code="default", **sqlalchemy_backend.params)
+            dbs.database(code="notes", handler_class=AsqueelDbHandler, source=sqlite_source)
+
+    server = AsgiServer(config=Recipe)
+    refusal = RuntimeError("close refused")
+
+    def refuse() -> None:
+        raise refusal
+
+    call = server.requests.register({"type": "task", "path": "/notes/work"})
+    try:
+        notes = server.take_database("notes")
+        archive = server.take_database("archive")
+        archive.close = refuse
+        default = server.take_database("default")
+        with pytest.raises(RuntimeError) as raised:
+            server.databases["default"].release(call)
+        # The asqueel session is not the SQLAlchemy handler's to close.
+        assert not asqueel_closed(notes)
+        server.databases["notes"].release(call)
+    finally:
+        server.requests.unregister(call)
+    assert raised.value is refusal
+    assert sqlalchemy_closed(default)
+    assert not sqlalchemy_closed(archive)
+    del archive.close
+    archive.close()
 
 
 def test_importing_without_sqlalchemy_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
