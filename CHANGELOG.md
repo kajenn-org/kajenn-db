@@ -18,14 +18,6 @@ All notable changes to kajenn-db are recorded here. The format follows
   `query()` giving a page view whose `fetch` is awaitable). The `asqueel`
   extra requires asqueel 0.9.5.
 
-### Changed
-
-- README rewritten: badges, a table of the handlers and their status, a quick
-  start; the details moved to the documentation.
-- Documentation reorganised into getting started, handler concepts, one guide
-  per backend, API reference per module, and contributing.
-- CI measures coverage and uploads it to Codecov.
-
 ## [0.1.0] — 2026-10-27
 
 First release. Requires `kajenn>=0.6.0`, the first kajenn with the
